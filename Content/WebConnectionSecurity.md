@@ -650,6 +650,103 @@ All of these functions have default implementations and if you do subclass them 
 
 > #### To be added later
 
+### Cookies and Sessions
+Most applications need to track something about the user after the user has logged in. At minimum you need to track the user's user ID so you can identify the user on the next request. The typical way this is done is by using HTTP Cookies which is a small bit of text that is stored in the browser's internal state storage and that is sent to the server with every request while the cookie is not expired.
+
+#### Cookie Usage
+Cookies should be used very sparingly and in general you should not store data in cookies, but rather identifiers that link back to content that is identifiable on the server. Cookies are often used in conjunction with server side Session State that provides for the actual 'data' stored that is related to the user cookie.
+
+The idea is that cookies are references to data that the server needs in order to identify a user and provide commond default functionality. For example, you need to track a logged in user, so that you can display the account information for that specific user after the user has logged in. If it weren't for cookies that identifying id would have to be passed by every request explicitly on the URL query string or form buffer. So to make this easier browsers provide a Cookie interface.
+
+Cookies are **set by the server** and **persisted by the client** and **sent to the server** on any subsequent server request.
+
+You can look at the cookies you are using in any of the browser DevTools:
+
+![](CookiesInChrome.png)
+
+Notice that most of the values stored there are single value identifiers. Also note that there can be many cookies and in the figure above most of the cookies are actually 3rd party cookies (from Google Analytics and AdWords specifically)
+
+Cookies are tied to a specific domain and have an expiration date if specified. By default **Cookies persist for the duration of the browser session**. Shut down the session kills the Cookie. You can explicitly set an expiration date though and the cookie then persists until that date in this browser.
+
+You can create cookies in Web Connection with the [Response.AddCookie()](https://webconnection.west-wind.com/docs/_1o80yq3ey.htm) function:
+
+```foxpro
+Response.AddCookie("wwmsgbrd",loUser.Id,"/",Date() + 5,.t.,.t.)
+```
+
+You pass:
+* A cookie name
+* A string value
+* A path: this defaults to the root of the site  
+*(you should never use a different value for this!)*
+* An optional expiration date (or .F.)
+* HttpOnly Cookie
+* Secure HTTPS based Cookie only
+
+
+The `llHttpOnly` flag determines that the cookie cannot be accessed from code, meaning it's not JavaScript hackable. It's a good idea to always use this featured *unless you explicitly need the cookie to be accessed in JavaScript* which should be very rare. 
+
+The `llHttpsOnly` makes it so that cookies are not set or sent when requests are not running over HTTP which prevents potential hacking of cookies in man-in-the-middle attacks. If you run your site only using HTTPS it's a good idea to enable this flag.
+
+> #### @icon-info-circle Keep Cookie Expiration Short
+> Although it's tempting to never expire cookies when persisting them, it's generally not a good idea to use long expiration times. Instead keep the expiration times to a few days max and allow for refreshing the cookie when a user comes back. Web Connection Session state automatically does rolling renewals as you access a site for persisted cookies.
+
+#### Session Storage - Server Side State
+Related to Cookies are Sessions, which store the active user's state on the server in a table. Cookies are meant to just hold identifiers, and a common use case for cookies is a `Session Id` that maps the cookie to a Session id on the server.
+
+##### Web Connection's Session object
+Web Connection's [wwSession Class](https://webconnection.west-wind.com/docs/_s8413ze4y.htm) uses a single cookie to link a Session table to a client side cookie. So rather than having a bunch of cookies on the client that hold information like Username, last on, and other info, that data can be stored on the server and read by the server side application. This is good because it doesn't make any of this potentially sensitive information available in the browser in a persistent fashion where it might be compromised. Instead Sessions store the key value pairs in a table on the server.
+
+Sessions are easy to use but they do have to be enabled explicitly. To do that you can calle `Process.InitSession()` - typically in `Process::OnProcessInit()` - to enable them:
+
+```foxpro
+FUNCTION OnProcessInit
+
+*** all parms are optional
+*** wwDemo Cookie, 30 minute timeout, 
+*** don't persist cookie across browser sessions
+THIS.InitSession("wwDemo",1800,.F.)
+...
+RETURN
+```
+
+> If you're using Authentication using `wwUserSecurity` as described earlier SessionState is automatically enabled in its default mode. I still recommend you explicitly configure Sessions as shown above for more control over how Sessions are configured.
+
+Once sessions have been set up you can set Session variable using `Session.SetSessionVar()` and `Session.GetSessionVar()`:
+
+```foxpro
+FUNCTION YourProcessMethod
+
+lcSessionVar = Session.GetSessionVar("MyVar")
+IF EMPTY(lcSessionVar)
+   *** Not set
+   Session.SetSessionVar("MyVar","Hello from a session. Created at: " + TIME())
+   lcSessionVar = Session.GetSessionVar("MyVar")
+ENDIF
+
+THIS.StandardPage("Session Demo","Session value: " + lcSessionVar)
+RETURN
+```
+
+##### What to use Session for
+Common Application related things to store in SessionStorage are:
+
+* User name
+* Email address (for Gravatar links for example)
+* Last access date for features
+* Simple preferences 
+* **anything that needs to persist and doesn't fit a typical business object**
+
+The advantage of Session storage is that it's often quicker to retrieve Session data than to pull that same data out of one or more business objects. Sessions values are good for values that are user specific but don't fit into user specific business objects - usually related around operational values that have to do with preferences and site settings.
+
+Although you can use Sessions to store this there's no requirement for this. You might also directly access a user table and user record that holds similar information in a more strongly typed format of a class with properties. But that's up to you.
+
+
+#### Don't make Cookie and Session Timeouts too long
+It's important to make sure Sessions and Cookies don't persist forever. It's good to allow keeping them alive with an explicit **Remember Me** option, but make sure that you don't expire the cookies too far in the future. While the cookie or session are valid it's possible to just get into a site for example, and you don't want unauthorized access from accidental physical access or worse a physically compromised machine. 
+
+If you need to perist cookies/sessions keep it to a few days max and instead rely on rolling updates. Rolling updates refresh the cookie after each use and persist the cookie out for another timeout period. `wwSession` does this automatically, so there never should be a reason to have really long sessions timeouts. For 'persistent' sessions using a few days max is probably a good call. Session uses 5 days in advance to remember you. If you use the site that infrequently then it's probably Ok to force a new login. But if you are frequent user that accesses the site every day you probably appreciate not having to login each time.
+
 ## Locking Down Web Connection
 
 There are two areas of concern when it comes to locking down Web Connection:
@@ -696,7 +793,7 @@ XSS works through user input and injecting script code into the input in hopes t
 So say, you are running a message board like I do and you take raw user input. Lets say I allow users to type plain text or markdown. Now our Fred Hacker comes along and types this into my simple `<textara>`
 
 
-```txt
+```markdown
 Hey, 
 
 Cool Site.
